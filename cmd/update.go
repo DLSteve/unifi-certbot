@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"fmt"
-
+	"github.com/DLSteve/unifi-certbot/dnsprovider"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"log"
 )
 
 func init() {
@@ -16,6 +17,12 @@ var updateCmd = &cobra.Command{
 	Long:  `Checks the certificate status on the UDM Pro. If the certificate has expired or is invalid Unifi CertBot
 will attempt to renew it.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Some test output")
+		apiKey := viper.GetString("dns-provider.cloud-flare.api-key")
+
+		dns := dnsprovider.NewCloudFlareProvider(apiKey)
+
+		if err := dns.CreateDnsTextEntry("bandsaw.io", "unifi.core.bandsaw.io", "some text here2"); err != nil {
+			log.Fatal(err)
+		}
 	},
 }
