@@ -3,6 +3,7 @@ package datastore
 import (
 	"encoding/json"
 	"errors"
+	"github.com/DLSteve/unifi-certbot/certs"
 	ucberrors "github.com/DLSteve/unifi-certbot/errors"
 	"github.com/DLSteve/unifi-certbot/user"
 	bolt "go.etcd.io/bbolt"
@@ -91,6 +92,75 @@ func (b *boltDataStore) GetUser(email string) (*user.LEUser, error) {
 	}
 
 	return &usr, nil
+}
+
+func (b *boltDataStore) SaveCerts(domain string, certs certs.LECerts) error {
+	var jsonData []byte
+	jsonData, err := json.Marshal(certs)
+	if err != nil {
+		return &ucberrors.DataStoreErr{
+			Err: err,
+		}
+	}
+
+	db, err := b.open()
+	if err != nil {
+		return &ucberrors.DataStoreErr{
+			Err: err,
+		}
+	}
+	defer db.Close()
+
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte("certs"))
+		if err != nil {
+			return &ucberrors.DataStoreErr{
+				Err: err,
+			}
+		}
+
+		return bucket.Put([]byte(domain), jsonData)
+	})
+}
+
+func (b *boltDataStore) GetCerts(domain string) (certs.LECerts, error) {
+	db, err := b.open()
+	if err != nil {
+		return certs.LECerts{}, err
+	}
+	defer db.Close()
+
+	var crt certs.LECerts
+	err = db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("certs"))
+		if bucket == nil {
+			return &ucberrors.DataStoreErr{
+				NotFound: true,
+				Err: errors.New("unable to find certs bucket"),
+			}
+		}
+		certJson := bucket.Get([]byte(domain))
+		if certJson == nil {
+			return &ucberrors.DataStoreErr{
+				NotFound: true,
+				Err: errors.New("unable to find cert for given domain"),
+			}
+		}
+
+		err = json.Unmarshal(certJson, &crt)
+		if err != nil {
+			return &ucberrors.DataStoreErr{
+				Err: err,
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return certs.LECerts{}, err
+	}
+
+	return crt, nil
 }
 
 func (b *boltDataStore) open() (*bolt.DB, error) {
