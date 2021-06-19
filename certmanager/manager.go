@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"github.com/DLSteve/unifi-certbot/certs"
 	"github.com/DLSteve/unifi-certbot/datastore"
@@ -18,7 +20,9 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/crypto/ssh"
 	"log"
+	"math"
 	"net"
+	"time"
 )
 
 type CMOptions struct {
@@ -129,6 +133,39 @@ func (c *CertManager) HostCertIsValid(domain string, port string) bool {
 	return true
 }
 
+func IsExpiring(crt certs.LECerts) (bool, error) {
+	var blocks [][]byte
+	raw := []byte(crt.Certificate)
+	for {
+		block, rest := pem.Decode(raw)
+		if block == nil {
+			break
+		}
+
+		if block.Type == "CERTIFICATE" {
+			blocks = append(blocks, block.Bytes)
+		}
+
+		raw = rest
+	}
+
+	currentTime := time.Now()
+
+	for _, blk := range blocks {
+		cert, err := x509.ParseCertificate(blk)
+		if err != nil {
+			return false, err
+		}
+
+		days := math.Floor(cert.NotAfter.Sub(currentTime).Hours() / 24)
+
+		if days <= 15 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (c *CertManager) ValidateAndRenew(options CMOptions) error {
 	ok := c.HostCertIsValid(options.Domain, options.SSLPort)
 	if !ok {
@@ -144,12 +181,20 @@ func (c *CertManager) ValidateAndRenew(options CMOptions) error {
 		}
 
 		if notFound {
-			crt, err = c.RenewCertificate(options.Domain, options.Email)
+			crt, err = c.renewAndSave(options)
 			if err != nil {
 				return err
 			}
+		}
 
-			err = c.DS.SaveCerts(options.Domain, crt)
+		expiring, err := IsExpiring(crt)
+		if err != nil {
+			return err
+		}
+
+		if expiring {
+			log.Println("Cert has expired or is expiring, renewing...")
+			crt, err = c.renewAndSave(options)
 			if err != nil {
 				return err
 			}
@@ -158,6 +203,20 @@ func (c *CertManager) ValidateAndRenew(options CMOptions) error {
 		return DeployCerts(options, crt)
 	}
 	return nil
+}
+
+func (c *CertManager) renewAndSave(options CMOptions) (certs.LECerts, error) {
+	crt, err := c.RenewCertificate(options.Domain, options.Email)
+	if err != nil {
+		return certs.LECerts{}, err
+	}
+
+	err = c.DS.SaveCerts(options.Domain, crt)
+	if err != nil {
+		return certs.LECerts{}, err
+	}
+
+	return crt, nil
 }
 
 func DeployCerts(options CMOptions, crt certs.LECerts) error {
