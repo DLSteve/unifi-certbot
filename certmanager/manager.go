@@ -130,6 +130,7 @@ func (c *CertManager) HostCertIsValid(domain string, port string) bool {
 		return false
 	} else if results.expiring {
 		log.Println("Unifi cert has expired or is expiring within 15 days")
+		return false
 	}
 
 	return true
@@ -240,6 +241,7 @@ func DeployCerts(options CMOptions, crt certs.LECerts) error {
 		return err
 	}
 
+	log.Println("Successfully renewed certificates, exiting...")
 	return nil
 }
 
