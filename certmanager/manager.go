@@ -126,47 +126,17 @@ func (c *CertManager) RenewCertificate(domain string, email string) (certs.LECer
 func (c *CertManager) HostCertIsValid(domain string, port string) bool {
 	results := checkHost(domain, port)
 	if results.err != nil {
-		log.Println(results.err)
+		log.Printf("Certificate check failed with the following error: %v", results.err)
 		return false
+	} else if results.expiring {
+		log.Println("Unifi cert has expired or is expiring within 15 days")
 	}
 
 	return true
 }
 
-func IsExpiring(crt certs.LECerts) (bool, error) {
-	var blocks [][]byte
-	raw := []byte(crt.Certificate)
-	for {
-		block, rest := pem.Decode(raw)
-		if block == nil {
-			break
-		}
-
-		if block.Type == "CERTIFICATE" {
-			blocks = append(blocks, block.Bytes)
-		}
-
-		raw = rest
-	}
-
-	currentTime := time.Now()
-
-	for _, blk := range blocks {
-		cert, err := x509.ParseCertificate(blk)
-		if err != nil {
-			return false, err
-		}
-
-		days := math.Floor(cert.NotAfter.Sub(currentTime).Hours() / 24)
-
-		if days <= 15 {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func (c *CertManager) ValidateAndRenew(options CMOptions) error {
+	log.Printf("Checking certificate for %v", options.Domain)
 	ok := c.HostCertIsValid(options.Domain, options.SSLPort)
 	if !ok {
 		var notFound bool
@@ -181,19 +151,22 @@ func (c *CertManager) ValidateAndRenew(options CMOptions) error {
 		}
 
 		if notFound {
+			log.Printf("No valid certificate found in local cache for %v, renewing...", options.Domain)
 			crt, err = c.renewAndSave(options)
 			if err != nil {
 				return err
 			}
+
+			return DeployCerts(options, crt)
 		}
 
-		expiring, err := IsExpiring(crt)
+		expiring, err := ValidateExpiration(crt)
 		if err != nil {
 			return err
 		}
 
 		if expiring {
-			log.Println("Cert has expired or is expiring, renewing...")
+			log.Printf("Cached certificate for %v has expired or is expiring within 15 days, renewing...", options.Domain)
 			crt, err = c.renewAndSave(options)
 			if err != nil {
 				return err
@@ -202,6 +175,8 @@ func (c *CertManager) ValidateAndRenew(options CMOptions) error {
 
 		return DeployCerts(options, crt)
 	}
+
+	log.Println("Certificate is still valid, exiting...")
 	return nil
 }
 
@@ -266,6 +241,43 @@ func DeployCerts(options CMOptions, crt certs.LECerts) error {
 	}
 
 	return nil
+}
+
+func IsExpiring(crt *x509.Certificate, currentTime time.Time) bool {
+	days := math.Floor(crt.NotAfter.Sub(currentTime).Hours() / 24)
+	// Expiring within 15 days or already expired
+	return days <= 15
+}
+
+func ValidateExpiration(crt certs.LECerts) (bool, error) {
+	var blocks [][]byte
+	raw := []byte(crt.Certificate)
+	for {
+		block, rest := pem.Decode(raw)
+		if block == nil {
+			break
+		}
+
+		if block.Type == "CERTIFICATE" {
+			blocks = append(blocks, block.Bytes)
+		}
+
+		raw = rest
+	}
+
+	currentTime := time.Now()
+
+	for _, blk := range blocks {
+		cert, err := x509.ParseCertificate(blk)
+		if err != nil {
+			return false, err
+		}
+
+		if IsExpiring(cert, currentTime) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func GetSSHClient(options CMOptions) (*ssh.Client, error) {

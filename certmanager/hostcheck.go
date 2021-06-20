@@ -26,10 +26,11 @@ func checkHost(host string, port string) checkResults {
 
 	defer conn.Close()
 
-	expiry := conn.ConnectionState().PeerCertificates[0].NotAfter
-	fmt.Printf("Issuer: %s\nExpiry: %v\n", conn.ConnectionState().PeerCertificates[0].Issuer, expiry.Format(time.RFC850))
-
-	// TODO: Check if cert is expiring soon.
+	currentTime := time.Now()
+	if IsExpiring(conn.ConnectionState().PeerCertificates[0], currentTime) {
+		result.expiring = true
+		return result
+	}
 
 	err = conn.VerifyHostname(host)
 	if err != nil {
