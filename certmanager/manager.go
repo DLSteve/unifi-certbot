@@ -196,7 +196,7 @@ func (c *CertManager) renewAndSave(options CMOptions) (certs.LECerts, error) {
 }
 
 func DeployCerts(options CMOptions, crt certs.LECerts) error {
-	configRoot := "/mnt/data/unifi-os/unifi-core/config"
+	configRoot := "/data/unifi-core/config"
 	client, err := GetSSHClient(options)
 	if err != nil {
 		return err
@@ -235,8 +235,8 @@ func DeployCerts(options CMOptions, crt certs.LECerts) error {
 		log.Println("Error updating permissions")
 	}
 
-	log.Println("Restarting UnifiOS")
-	err = RunSSHCommand(client, "unifi-os restart")
+	log.Println("Reloading UnifiOS Core")
+	err = RunSSHCommand(client, "systemctl reload unifi-core")
 	if err != nil {
 		return err
 	}
@@ -247,8 +247,8 @@ func DeployCerts(options CMOptions, crt certs.LECerts) error {
 
 func IsExpiring(crt *x509.Certificate, currentTime time.Time) bool {
 	days := math.Floor(crt.NotAfter.Sub(currentTime).Hours() / 24)
-	// Expiring within 15 days or already expired
-	return days <= 15
+	// Expiring within 30 days or already expired
+	return days <= 30
 }
 
 func ValidateExpiration(crt certs.LECerts) (bool, error) {
@@ -284,7 +284,7 @@ func ValidateExpiration(crt certs.LECerts) (bool, error) {
 
 func GetSSHClient(options CMOptions) (*ssh.Client, error) {
 	config := &ssh.ClientConfig{
-		User: options.SSHUser,
+		User:            options.SSHUser,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Auth: []ssh.AuthMethod{
 			ssh.Password(options.SSHPassword),
